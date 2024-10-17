@@ -57,33 +57,61 @@ function init() {
   time MAX_EVENTS have been fired.
 
 */
-
 class EventHandler extends EventStatistics<EventName> {
-  // Feel free to edit this class
-
   repository: EventRepository;
+  private eventQueue: EventName[] = [];
+  private processing: boolean = false;
+  private eventCounts: Map<EventName, number> = new Map();
 
   constructor(emitter: EventEmitter<EventName>, repository: EventRepository) {
     super();
     this.repository = repository;
-    for (let i = 0; i <EVENT_NAMES.length ; i++) {
-      const EVENT = EVENT_NAMES[i] as EventName;
-      emitter.subscribe(EVENT, async  () => {
-          const handlerNum = await this.repository.saveEventData(EVENT, 1)
-          if (handlerNum) {
-            this.setStats(EVENT, handlerNum)
-          }
-        }
-      );
+
+    EVENT_NAMES.forEach((eventName) => {
+      emitter.subscribe(eventName, () => {
+        this.setStats(eventName, this.getStats(eventName) + 1);
+        this.enqueueEvent(eventName);
+        this.incrementEventCount(eventName);
+        this.processQueue();
+      });
+    });
+  }
+
+  private enqueueEvent(eventName: EventName) {
+    this.eventQueue.push(eventName);
+  }
+
+  private incrementEventCount(eventName: EventName) {
+    this.eventCounts.set(eventName, (this.eventCounts.get(eventName) || 0) + 1);
+  }
+
+  private async processQueue() {
+    if (this.processing || this.eventQueue.length === 0) {
+      return;
     }
+
+    this.processing = true;
+
+    while (this.eventQueue.length > 0) {
+      const eventName = this.eventQueue.shift();
+
+      if (eventName !== undefined) {
+        try {
+          await this.repository.saveEventData(eventName, this.eventCounts.get(eventName) || 0);
+          this.eventCounts.set(eventName, 0);
+        } catch (e) {
+          console.error(`Error saving event data for ${eventName}:`, e);
+          this.enqueueEvent(eventName);
+        }
+      }
+    }
+
+    this.processing = false;
   }
 }
 
 class EventRepository extends EventDelayedRepository<EventName> {
-  // Feel free to edit this class
-
-  // @ts-ignore
-  async saveEventData(eventName: EventName, _: number): Promise<number> {
+  async saveEventData(eventName: EventName, _: number): Promise<number > {
     try {
       this.setStats(
         eventName,
@@ -92,10 +120,9 @@ class EventRepository extends EventDelayedRepository<EventName> {
       await this.updateEventStatsBy(eventName, 1);
       return this.getStats(eventName) ?? 0
     } catch (e) {
-      // const _error = e as EventRepositoryError;
-      // console.warn(error);
+      return  0
     }
   }
 }
 
-init();
+init()
